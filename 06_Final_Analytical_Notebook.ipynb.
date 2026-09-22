@@ -1,0 +1,162 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Final Analytical Notebook: Retail Strategic Growth Plan\n",
+    "This notebook contains the consolidated data pipeline, exploratory data analysis, and statistical evidence supporting the Executive Decision Report."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "\n",
+    "# Set visual style\n",
+    "sns.set_theme(style=\"whitegrid\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 1. Data Ingestion & Cleaning (Methodology)\n",
+    "Loading the raw data, handling anomalies, and engineering financial features (Revenue, Cost, Profit)."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Load raw data\n",
+    "try:\n",
+    "    df = pd.read_csv('retail-orders-raw.csv')\n",
+    "except FileNotFoundError:\n",
+    "    print(\"File not found. Please ensure 'retail-orders-raw.csv' is in the directory.\")\n",
+    "\n",
+    "# Data Cleaning Pipeline\n",
+    "df = df.drop_duplicates(subset=['order_id'])\n",
+    "df['customer_segment'] = df['customer_segment'].str.title()\n",
+    "df['payment_status'] = df['payment_status'].str.title()\n",
+    "df['city'] = df['city'].fillna('Unknown')\n",
+    "df['discount_pct'] = df['discount_pct'].fillna(0.0)\n",
+    "df['quantity'] = df['quantity'].replace('two', 2)\n",
+    "df['quantity'] = pd.to_numeric(df['quantity']).apply(lambda x: abs(x) if x < 0 else x)\n",
+    "df['discount_pct'] = df['discount_pct'].apply(lambda x: 100.0 if x > 100.0 else x)\n",
+    "df['order_date'] = pd.to_datetime(df['order_date'], format='mixed', errors='coerce')\n",
+    "df = df.dropna(subset=['order_date'])\n",
+    "\n",
+    "# Feature Engineering\n",
+    "df['total_revenue'] = df['quantity'] * df['unit_price'] * (1 - (df['discount_pct'] / 100))\n",
+    "df['unit_cost'] = df['unit_price'] * 0.60  # Simulated 60% COGS\n",
+    "df['total_cost'] = df['quantity'] * df['unit_cost']\n",
+    "df['profit'] = df['total_revenue'] - df['total_cost']\n",
+    "df['profit_margin_pct'] = np.where(df['total_revenue'] > 0, (df['profit'] / df['total_revenue']) * 100, 0)\n",
+    "\n",
+    "print(\"Data cleaning complete. Final shape:\", df.shape)\n",
+    "display(df.head())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 2. Key Revenue Drivers\n",
+    "Identifying top-performing segments and categories."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print(\"--- Revenue by Customer Segment ---\")\n",
+    "segment_analysis = df.groupby('customer_segment').agg(\n",
+    "    Total_Revenue=('total_revenue', 'sum'),\n",
+    "    Average_Order_Value=('total_revenue', 'mean'),\n",
+    "    Order_Count=('order_id', 'count')\n",
+    ").reset_index()\n",
+    "display(segment_analysis.sort_values(by='Total_Revenue', ascending=False))\n",
+    "\n",
+    "plt.figure(figsize=(8, 4))\n",
+    "sns.barplot(data=segment_analysis, x='customer_segment', y='Total_Revenue', palette='viridis')\n",
+    "plt.title('Total Revenue by Customer Segment')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 3. Risk Areas: Margin Erosion\n",
+    "Analyzing the impact of aggressive discounting on profitability."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.figure(figsize=(8, 5))\n",
+    "sns.regplot(data=df, x='discount_pct', y='profit_margin_pct', color='red', scatter_kws={'alpha':0.6})\n",
+    "plt.title('Impact of Discount Percentage on Profit Margin')\n",
+    "plt.xlabel('Discount Percentage (%)')\n",
+    "plt.ylabel('Profit Margin (%)')\n",
+    "plt.axhline(0, color='black', linestyle='--') # Break-even line\n",
+    "plt.show()\n",
+    "\n",
+    "corr = df['discount_pct'].corr(df['profit_margin_pct'])\n",
+    "print(f\"Correlation between Discount and Profit Margin: {corr:.2f}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## 4. Scenario Analysis: ROI Projection (Strategic Recommendation 1)\n",
+    "Simulating the financial impact of capping discounts at a maximum of 10%."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create a scenario dataframe where max discount is 10%\n",
+    "scenario_df = df.copy()\n",
+    "scenario_df['optimized_discount'] = scenario_df['discount_pct'].apply(lambda x: min(x, 10.0))\n",
+    "\n",
+    "scenario_df['optimized_revenue'] = scenario_df['quantity'] * scenario_df['unit_price'] * (1 - (scenario_df['optimized_discount'] / 100))\n",
+    "scenario_df['optimized_profit'] = scenario_df['optimized_revenue'] - scenario_df['total_cost']\n",
+    "\n",
+    "current_total_profit = df['profit'].sum()\n",
+    "optimized_total_profit = scenario_df['optimized_profit'].sum()\n",
+    "profit_increase = optimized_total_profit - current_total_profit\n",
+    "profit_increase_pct = (profit_increase / abs(current_total_profit)) * 100\n",
+    "\n",
+    "print(f\"Current Total Profit: ${current_total_profit:,.2f}\")\n",
+    "print(f\"Projected Profit (with 10% Discount Cap): ${optimized_total_profit:,.2f}\")\n",
+    "print(f\"Projected Profit Increase: ${profit_increase:,.2f} (+{profit_increase_pct:.1f}%)\")"
+   ]
+  }
+ ],
+ "metadata": {
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
